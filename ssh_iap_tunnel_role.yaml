@@ -1,0 +1,5 @@
+title: sshiapTunnelUser
+description: Custom IAP-secured Tunnel User
+stage: ALPHA
+includedPermissions:
+- iap.tunnelInstances.accessViaIAP

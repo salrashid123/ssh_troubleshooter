@@ -1,0 +1,6 @@
+title: saUserRole
+description: Role to grant SSH SA User
+stage: ALPHA
+includedPermissions:
+- iam.serviceAccounts.actAs
+- iam.serviceAccounts.get

@@ -1,0 +1,7 @@
+title: sshLoginRole
+description: Role to grant SSH OS Login
+stage: ALPHA
+includedPermissions:
+- compute.instances.setMetadata
+- compute.instances.use
+- compute.instances.get
