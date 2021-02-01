@@ -501,7 +501,7 @@ func main() {
 	}
 
 	if *verifyIAPTunnel {
-		_, err = getIAP(ctx, tokenSource, *projectID, *zone, *instance)
+		_, err = getIAP(ctx, tokenSource, *projectID, *zone, cresp.InstanceID)
 		if err != nil {
 			glog.Error(err)
 			os.Exit(-1)
