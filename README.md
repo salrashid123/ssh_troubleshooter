@@ -428,6 +428,19 @@ $ go run main.go --access_token=$TOKEN --instance os-login --connectUserName=use
     I0201 08:02:40.045353 3562122 main.go:373]      Remote Command: connected as user user4_esodemoapp2_com  to  os-login
 ```
 
+
+Also note that the `roles/compute.osLogin`, incldues varius other permissions
+```
+    compute.instances.get
+    compute.instances.list
+    compute.instances.osLogin
+    compute.projects.get
+    resourcemanager.projects.get
+    resourcemanager.projects.list
+    serviceusage.quotas.get
+    serviceusage.services.get
+    serviceusage.services.list
+```
 ---
 
 ### VM with IAP-Tunnel
@@ -498,14 +511,9 @@ go run main.go --access_token=$TOKEN --instance iap-tunnel \
   --project $PROJECT_ID --verifyIAPTunnel --zone $ZONE -v 20 -alsologtostderr
 ```
 
-### Conclusion
-
-this is really a work in progress and is intended to guide you through on the various common pitfalls with ssh into GCE
-
-
 #### Misc
 
-Other stuff with SSH
+SSH with ssh cli
 
 ```bash
 ## SSH CLI Directly
@@ -518,3 +526,227 @@ gcloud compute start-iap-tunnel os-login 22  --local-host-port=localhost:9022
 ssh -i ~/.ssh/google_compute_engine -o UserKnownHostsFile=/dev/null \
     -o CheckHostIP=no -o StrictHostKeyChecking=no     user4@localhost -p 9022
 ```
+
+
+#### Using CLI
+
+```bash
+
+export TOKEN=`gcloud auth print-access-token`
+export PROJECT_ID=`gcloud config get-value core/project`
+export ZONE=`gcloud config get-value compute/zone`
+
+
+export SSH_USERNAME=user4@esodemoap2.com
+export VM_SERVICE_ACCOUNT=248066739582-compute@developer.gserviceaccount.com
+
+export INSTANCE_NAME=external
+
+echo $PROJECT_ID
+echo $ZONE
+echo $INSTANCE_NAME
+```
+
+#### Verify Identity
+
+Make sure current user is logged into gcloud
+
+The `email` field should match `$SSH_USERNAME`
+
+```bash
+$ curl -s https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=`gcloud auth print-access-token` | jq '.'
+{
+  "issued_to": "32555940559.apps.googleusercontent.com",
+  "audience": "32555940559.apps.googleusercontent.com",
+  "user_id": "110967776893118323359",
+  "scope": "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/appengine.admin https://www.googleapis.com/auth/compute https://www.googleapis.com/auth/accounts.reauth",
+  "expires_in": 3599,
+  "email": "user4@esodemoapp2.com",
+  "verified_email": true,
+  "access_type": "offline"
+}
+```
+#### Base Project Permissions
+
+```bash
+$ gcloud compute ssh $INSTANCE_NAME --project $PROJECT_ID --zone $ZONE
+ERROR: (gcloud.compute.ssh) Could not fetch resource:
+ - Required 'compute.instances.get' permission for 'projects/fabled-ray-104117/zones/us-central1-a/instances/external'
+```
+
+  >> Grant user IAM `compute.viewer` Role on project
+
+
+```bash
+$ gcloud compute ssh $INSTANCE_NAME --project $PROJECT_ID --zone $ZONE
+   External IP address was not found; defaulting to using IAP tunneling.
+   Updating project ssh metadata...failed.                                                                                                       
+   Updating instance ssh metadata...failed.                                                                                                      
+   ERROR: (gcloud.compute.ssh) Could not add SSH key to instance metadata:
+   - Required 'compute.instances.setMetadata' permission for 'projects/fabled-ray-104117/zones/us-central1-a/instances/external'
+```
+
+  Use `testIAMPermissions to verify access`
+
+```bash
+    $ curl -s --request POST   https://compute.googleapis.com/compute/v1/projects/$PROJECT_ID/zones/$ZONE/instances/$INSTANCE_NAME/testIamPermissions  --header "Authorization: Bearer $TOKEN"   --header 'Accept: application/json'   --header 'Content-Type: application/json'   --data '{"permissions":["compute.instances.setMetadata","compute.instances.useReadOnly"]}'  | jq '.'
+```
+
+
+
+  >> Grant user  `Compute Instance Admin Role` to VM
+
+#### Base Service Account Permissions
+
+```bash
+$ gcloud compute ssh $INSTANCE_NAME --project $PROJECT_ID --zone $ZONE
+   External IP address was not found; defaulting to using IAP tunneling.
+   Updating project ssh metadata...failed.                                                                                                       
+   Updating instance ssh metadata...failed.                                                                                                      
+   ERROR: (gcloud.compute.ssh) Could not add SSH key to instance metadata:
+   - The user does not have access to service account '248066739582-compute@developer.gserviceaccount.com'.  User: 'user4@esodemoapp2.com'.  Ask a project owner to grant you the iam.serviceAccountUser role on the service account
+```
+
+  Use `testIAMPermissions to verify access`
+
+```bash
+   curl --request POST      https://iam.googleapis.com/v1/projects/$PROJECT_ID/serviceAccounts/$VM_SERVICE_ACCOUNT:testIamPermissions \
+      --header "Authorization: Bearer `gcloud auth print-access-token`"      --header 'Accept: application/json'      --header 'Content-Type: application/json' --data '{"permissions":["iam.serviceAccounts.actAs"]}'
+```
+   If the command above returns an empty JSON struct, you need permissions to execute
+
+  >> Grant user `Service Account User` Role on Service Account
+
+#### Connectivity
+
+```bash
+$ gcloud compute ssh $INSTANCE_NAME --project $PROJECT_ID --zone $ZONE
+      External IP address was not found; defaulting to using IAP tunneling.
+      Updating project ssh metadata...failed.                                                                                                       
+      Updating instance ssh metadata...⠏Updated [https://www.googleapis.com/compute/v1/projects/fabled-ray-104117/zones/us-central1-a/instances/external].
+      Updating instance ssh metadata...done.                                                                                                        
+      Waiting for SSH key to propagate.
+      ERROR: (gcloud.compute.start-iap-tunnel) Error while connecting [4033: 'not authorized'].
+      kex_exchange_identification: Connection closed by remote host
+      Connection closed by UNKNOWN port 65535
+      ERROR: (gcloud.compute.ssh) [/usr/bin/ssh] exited with return code [255].
+```
+
+ - Verify if VM is running
+
+```bash
+$ gcloud compute instances list --filter="name=$INSTANCE_NAME" --project $PROJECT_ID 
+      NAME      ZONE           MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP  STATUS
+      external  us-central1-a  e2-small                   10.128.0.37               TERMINATED
+```
+   >> Start Instance
+
+- Verify if VM is accessible
+
+```bash
+$ gcloud compute instances list --filter="name=$INSTANCE_NAME" --project $PROJECT_ID 
+      NAME      ZONE           MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
+      external  us-central1-a  e2-small                   10.128.0.37  34.121.236.153  RUNNING
+
+$ gcloud compute ssh $INSTANCE_NAME --project $PROJECT_ID --zone $ZONE
+      ssh: connect to host 34.121.236.153 port 22: Connection timed out
+      ERROR: (gcloud.compute.ssh) [/usr/bin/ssh] exited with return code [255].
+```
+
+  >> Use telnet
+
+```bash
+         export EXTERNAL_IP=34.121.236.153
+         $ telnet $EXTERNAL_IP 22
+         Trying 34.121.236.153...
+         telnet: Unable to connect to remote host: Connection timed out
+```
+
+   >> Use traceroute or [mtr](https://en.wikipedia.org/wiki/MTR_(software)) if ICMP is allowed
+
+- Check Firewall rule allows port 22 from your IP
+
+   If firewall allowed, you should see
+```bash
+   $ telnet $EXTERNAL_IP 22
+      Trying 34.121.236.153...
+      Connected to 34.121.236.153.
+      Escape character is '^]'.
+      SSH-2.0-OpenSSH_7.9p1 Debian-10+deb10u2
+
+```
+
+#### OS-Login
+
+If the VM use OS-Login, you may see
+
+```bash
+   $ gcloud compute ssh $INSTANCE_NAME --project $PROJECT_ID --zone $ZONE
+      user4_esodemoapp2_com@34.121.217.36: Permission denied (publickey).
+      ERROR: (gcloud.compute.ssh) [/usr/bin/ssh] exited with return code [255].
+```
+
+  Use `testIAMPermissions to verify access`
+
+```bash
+   curl -s --request POST   https://compute.googleapis.com/compute/v1/projects/$PROJECT_ID/zones/$ZONE/instances/$INSTANCE_NAME/testIamPermissions  --header "Authorization: Bearer `gcloud auth print-access-token`"   --header 'Accept: application/json'   --header 'Content-Type: application/json'   --data '{"permissions":["compute.instances.osLogin"]}'  | jq '.'
+```
+
+   If the command above returns an empty JSON struct, you need permissions to execute
+
+  >> Grant user `Compute OS Login`  Role on VM.  You may also need to grant ServiceAccount Act As permissions to the VM's Service Account
+
+
+#### IAP-Tunnel
+
+If the instance is running but does not have external IP, you may need to use IAP Tunnel
+
+```bash
+   $ gcloud compute instances list --filter="name=$INSTANCE_NAME" --project $PROJECT_ID 
+   NAME        ZONE           MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP  STATUS
+   iap-tunnel  us-central1-a  e2-small                   10.128.0.36               RUNNING
+
+
+   $ gcloud compute ssh $INSTANCE_NAME --project $PROJECT_ID --zone $ZONE
+      External IP address was not found; defaulting to using IAP tunneling.
+      Updating project ssh metadata...failed.                                                                                                                                                                                                                                            
+      ERROR: (gcloud.compute.start-iap-tunnel) Error while connecting [4033: 'not authorized'].
+      kex_exchange_identification: Connection closed by remote host
+      Connection closed by UNKNOWN port 65535
+      ERROR: (gcloud.compute.ssh) [/usr/bin/ssh] exited with return code [255].
+```
+
+  Use `testIAMPermissions to verify access`.  Note, the command below uses the `INSTANCE_ID` value (not Instance NAME)
+
+```bash
+   export INSTANCE_ID=8385516816452777955
+
+   curl -s --request POST   \
+      https://iap.googleapis.com/v1/projects/$PROJECT_ID/iap_tunnel/zones/$ZONE/instances/$INSTANCE_ID:testIamPermissions   \
+      --header "Authorization: Bearer `gcloud auth print-access-token`"      --header 'Accept: application/json'   \
+      --header 'Content-Type: application/json'      --data '{"permissions":["iap.tunnelInstances.accessViaIAP"]}' | jq '.'
+```
+
+>> Ensure the user has `IAP Tunnel User`  Roles assigned.  You may also need `Service Account User` Role on the SerivceAccount
+
+Other considerations for IAPTunnel:
+
+- Access to the IAP API maybe restricted [Manage access for Cloud Console & APIs](https://console.cloud.google.com/security/caa/console)
+
+
+### Chrome Extension
+
+If you use the [SSH Chrome Extension](chrome-extension://iodihamcpbpeioajjeobimgagajmlibd/html/nassh.html), make sure the IP is correct and that
+you select the correct private key by specifying the [Identity File](chrome-extension://iodihamcpbpeioajjeobimgagajmlibd/plugin/docs/ssh_config.5.html#IdentityFile) as the one setup with GCP `~/.ssh/google_compute_engine`.  Alternatively, you can copy your key as the default one for SSH:
+
+```
+cp ~/.ssh/google_compute_engine ~/.ssh/id_rsa
+```
+
+Once set, simply define a profile or use the SSH Handler that the extension enables:
+
+```
+ssh://srashid@34.72.182.7
+```
+
+![image/chrome_ssh.png](images/chrome_ssh.png)
